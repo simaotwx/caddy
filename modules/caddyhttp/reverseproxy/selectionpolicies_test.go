@@ -15,6 +15,7 @@
 package reverseproxy
 
 import (
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -197,6 +198,46 @@ func TestIPHashPolicy(t *testing.T) {
 	h = ipHash.Select(pool, req, nil)
 	if h != nil {
 		t.Error("Expected ip hash policy host to be nil.")
+	}
+
+	// We should get a result back when there is one healthy host left.
+	pool[1].SetHealthy(true)
+	h = ipHash.Select(pool, req, nil)
+	if h == nil {
+		// If it is nil, it means we missed a host even though one is available
+		t.Error("Expected ip hash policy host to not be nil, but it is nil.")
+	}
+
+	// Do the same with randomly generated host counts
+	// to make sure there are no indexing issues (see issue #4135)
+	for breakageAttempts := 0; breakageAttempts < 5; breakageAttempts++ {
+		randCount := 50 + rand.Intn(50)
+		pool = make(UpstreamPool, randCount)
+		for poolIx := 0; poolIx < len(pool); poolIx++ {
+			upstream := &Upstream{Host: new(upstreamHost)}
+			upstream.SetHealthy(false)
+			pool[poolIx] = upstream
+		}
+		// Make the last one a healthy one
+		pool[randCount - 1].SetHealthy(true)
+
+		// Test issue
+		h = ipHash.Select(pool, req, nil)
+		if h == nil {
+			// If it is nil, it means we missed a host even though one is available
+			t.Error("Expected ip hash policy host to not be nil, but it is nil.")
+		}
+
+		// Make a random one healthy
+		pool[randCount - 1].SetHealthy(false)
+		pool[rand.Intn(randCount)].SetHealthy(true)
+
+		// Test issue
+		h = ipHash.Select(pool, req, nil)
+		if h == nil {
+			// If it is nil, it means we missed a host even though one is available
+			t.Error("Expected ip hash policy host to not be nil, but it is nil.")
+		}
 	}
 }
 
